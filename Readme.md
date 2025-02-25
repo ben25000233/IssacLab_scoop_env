@@ -1,12 +1,15 @@
-Run Instructions
 
-To execute the script, simply run:
-
-python test.py
-
-
-Note : 
+### build environments
 
 No additional libraries need to be installed.
 
-Modify the initial soft pose on line 171 of test.py .
+## Set parameters
+```
+Modify the initial soft pose on line 171 of test.py .```
+
+```
+## Run
+```
+python test.py
+```
+
