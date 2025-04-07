@@ -1,8 +1,9 @@
 import numpy as np
 import open3d as o3d
 import torch
+from scipy.spatial.transform import Rotation as Rot
 
-class Functions():
+class Pcd_functions():
     def __init__(self):
         pass
     def depth_to_point_cloud(self, depth, segmantation, object_id = None, object_type = None, device="cpu"):
@@ -15,7 +16,7 @@ class Functions():
         fx, fy = intrinsic[0, 0], intrinsic[1, 1]
         cx, cy = intrinsic[0, 2], intrinsic[1, 2]
         u, v = np.meshgrid(np.arange(w), np.arange(h))
-        z = depth.astype(np.float32) / 1000.0
+        z = depth.astype(np.float32) 
         x = (u - cx) * z / fx
         y = (v - cy) * z / fy
         points = np.stack((x, y, z), axis=-1).reshape(-1, 3)
@@ -124,8 +125,9 @@ class Functions():
 
     def from_ee_to_spoon(self, ee_point, pcd):
         # Convert inputs to torch tensors
-        ee_point = torch.tensor(ee_point, dtype=torch.float32)
+        ee_point = ee_point.clone().detach().to("cpu")
         pcd = torch.tensor(pcd, dtype=torch.float32)
+        self.offset_list = np.load("new_pcd_offset_list.npy")
         offsets = torch.tensor(self.offset_list, dtype=torch.float32)  # Shape: [N, 3]
 
         # Precompute constants
