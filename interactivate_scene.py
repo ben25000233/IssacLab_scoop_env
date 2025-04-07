@@ -36,7 +36,7 @@ import isaacsim.core.utils.prims as prim_utils
 
 from isaaclab.sensors import CameraCfg, TiledCameraCfg
 
-from pcd_functions import Functions
+from pcd_functions import Pcd_functions
 
 ##
 # Pre-defined configs
@@ -178,6 +178,7 @@ def add_rigid():
 
     for idx, origin in tqdm.tqdm(enumerate(rigid_origins), total=len(rigid_origins)):
         obj_cfg.func(f"/World/rigid/Object{idx:02d}", obj_cfg, translation=origin)
+
         
 
     rigid_cfg = RigidObjectCfg(
@@ -246,8 +247,9 @@ def add_camera(cam_type = "front"):
         colorize_instance_id_segmentation=False,
         colorize_instance_segmentation=False,
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=18.0, focus_distance=400.0, horizontal_aperture=20.955
+            focal_length=8, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
         ),
+
         offset=CameraCfg.OffsetCfg(pos=cam_pos, rot=cam_rot, convention="ros"),
     )
 
@@ -331,8 +333,11 @@ class TableTopSceneCfg(InteractiveSceneCfg):
 
     rigid_object = add_rigid()
 
+
     front_camera = add_camera("front")
     back_camera = add_camera("back")
+
+    
  
     bowl = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/bowl",
@@ -344,7 +349,7 @@ class TableTopSceneCfg(InteractiveSceneCfg):
             collision_props=sim_utils.CollisionPropertiesCfg(),
             semantic_tags = [("class", "bowl"), ("id", "2")],
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.59, -0.11, 0.05)),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.59, -0.11, 0.04)),
     )
 
 
@@ -358,10 +363,23 @@ class DataCollection():
         self.mean_eepose_euler = mean_eepose_euler
         self.mean_eepose_qua = mean_eepose_qua
 
+        
+        self.gt_front = np.load("./real_cam_pose/front_cam2base.npy")
+        self.gt_back = np.load("./real_cam_pose/back_cam2base.npy")
+        self.ref_bowl = np.load("./ref_bowl_pcd.npy")
+        self.init_spoon_pcd = np.load("./ori_init_spoon_pcd.npy")
+        self.offset_list = np.load("new_pcd_offset_list.npy")
+        
+
         self.eepose_offset = 0.045
-        self.Functions = Functions()
+        self.pcd_functions = Pcd_functions()
 
         self.num_envs = 1
+
+        self.bowl_semantic_id = None
+        self.food_semantic_id = None
+
+        self.action_horizon = 12
 
         # robot proprioception data
         self.record_ee_pose = [[] for _ in range(self.num_envs)]
@@ -370,7 +388,7 @@ class DataCollection():
         self.front_rgb_list = [[] for _ in range(self.num_envs)]
         self.front_depth_list = [[] for _ in range(self.num_envs)]
         self.front_seg_list = [[] for _ in range(self.num_envs)]
-        self.front_pcd_color_list = [[] for _ in range(self.num_envs)]
+        self.mix_all_pcd_list = [[] for _ in range(self.num_envs)]
 
         # back camera data
         self.back_rgb_list = [[] for _ in range(self.num_envs)]
@@ -378,18 +396,80 @@ class DataCollection():
         self.back_seg_list = [[] for _ in range(self.num_envs)]
         self.back_pcd_color_list = [[] for _ in range(self.num_envs)]
 
+        self.spillage_amount = [[] for _ in range(self.num_envs)]
+        self.scooped_amount = [[] for _ in range(self.num_envs)]
+        self.spillage_vol = [[] for _ in range(self.num_envs)]
+        self.scooped_vol = [[] for _ in range(self.num_envs)]
+        self.spillage_type = [[] for _ in range(self.num_envs)]
+        self.scooped_type = [[] for _ in range(self.num_envs)]
+        self.binary_spillage = [[] for _ in range(self.num_envs)]
+        self.binary_scoop = [[] for _ in range(self.num_envs)]
+
+        self.pre_spillage = np.zeros(self.num_envs)
+
+    def get_info(self, scene: InteractiveScene, robot_entity_cfg = None):
+
+
+        front_rgb_image  = self.front_camera.data.output["rgb"][0].cpu().numpy()
+        front_depth_image  = self.front_camera.data.output["distance_to_image_plane"][0].cpu().numpy()
+        front_seg_image  = self.front_camera.data.output["semantic_segmentation"][0].cpu().numpy()
+
+        back_rgb_image  = self.back_camera.data.output["rgb"][0].cpu().numpy()
+        back_depth_image  = self.back_camera.data.output["distance_to_image_plane"][0].cpu().numpy()
+        back_seg_image  = self.back_camera.data.output["semantic_segmentation"][0].cpu().numpy()
+
+        # plt.imshow(back_depth_image)
+        # plt.show()
+        # exit()
+
+
+        food_pcd = self.pcd_functions.depth_to_point_cloud(back_depth_image[..., 0], back_seg_image[..., 0], object_type = "food", object_id = self.food_semantic_id)
+        back_food_world = self.pcd_functions.transform_to_world(food_pcd[:, :3], self.gt_back)
+        object_seg = np.full((back_food_world.shape[0], 1), 2)
+        back_food_world = np.hstack((back_food_world, object_seg))
+
+        # bowl_pcd = self.pcd_functions.depth_to_point_cloud(back_depth_image[..., 0], back_seg_image[..., 0], object_type = "bowl", object_id = self.bowl_semantic_id)
+        # back_bowl_world = self.pcd_functions.transform_to_world(bowl_pcd[:, :3], self.gt_back)
+        # object_seg = np.full((back_bowl_world.shape[0], 1), 4)
+        # back_bowl_world = np.hstack((back_bowl_world, object_seg))
+
+
+        # get tool 
+        sim_current_pose = self.robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
+        sim_cor = sim_current_pose
+
+        trans_tool = self.pcd_functions.from_ee_to_spoon(sim_cor[0], self.init_spoon_pcd)
+        object_seg = np.full((trans_tool.shape[0], 1), 1)
+        trans_tool = np.hstack((trans_tool, object_seg))
+
+        mix_all_pcd = np.concatenate(( trans_tool, back_food_world, self.ref_bowl), axis=0)
+        # mix_all_pcd = np.concatenate((back_food_world, trans_tool), axis=0)
+        mix_all_pcd = self.pcd_functions.align_point_cloud(mix_all_pcd, target_points = 30000)
+        mix_all_nor_pcd = self.pcd_functions.nor_pcd(mix_all_pcd)
+        # self.pcd_functions.check_pcd_color(mix_all_nor_pcd)
+
+
+    
+        self.front_rgb_list[0].append(front_rgb_image)
+        self.front_depth_list[0].append(front_depth_image)
+        self.front_seg_list[0].append(front_seg_image)
+
+        self.back_rgb_list[0].append(back_rgb_image)
+        self.back_depth_list[0].append(back_depth_image)
+        self.back_seg_list[0].append(back_seg_image)
+
+        self.mix_all_pcd_list[0].append(mix_all_nor_pcd)
+
     def run_simulator(self, sim: sim_utils.SimulationContext, scene: InteractiveScene):
         """Runs the simulation loop."""
         # Extract scene entities
         # note: we only do this here for readability.
-        robot = scene["robot"]
-        front_camera = scene["front_camera"]
-        back_camera = scene["back_camera"]
+        self.robot = scene["robot"]
+        self.front_camera = scene["front_camera"]
+        self.back_camera = scene["back_camera"]
         self.device = sim.device
 
-        # camera_positions = torch.tensor([[1.5, 0, 0.8]], device=sim.device)
-        # camera_targets = torch.tensor([[0.0, 0.0, 0.0]], device=sim.device)
-        # camera.set_world_poses_from_view(camera_positions, camera_targets)
+        reset_frame = 70
 
 
         # Create controller
@@ -408,12 +488,10 @@ class DataCollection():
 
         # modify the trajectory to simulation
         modify_ee_goals = self.eepose_real2sim_offset(ee_goals)
-        modify_ee_goals = torch.tensor(modify_ee_goals, device=sim.device)
-
-        init_joint =  torch.tensor([[1.77321586, -0.82879892, -1.79624463, -1.65110402, -0.77492251, 1.80433866, -0.78061272, 0.04, 0.04]], device = sim.device)
+        modify_ee_goals = modify_ee_goals.clone().detach().to(sim.device)
         
         # Create buffers to store actions
-        ik_commands = torch.zeros(scene.num_envs, diff_ik_controller.action_dim, device=robot.device)
+        ik_commands = torch.zeros(scene.num_envs, diff_ik_controller.action_dim, device=self.device)
         ik_commands[:] = modify_ee_goals[0]
 
         # robot_entity_cfg = SceneEntityCfg("robot", joint_names=["panda_joint.*"], body_names=["panda_hand"])
@@ -424,7 +502,7 @@ class DataCollection():
         # Obtain the frame index of the end-effector
         # For a fixed base robot, the frame index is one less than the body index. This is because
         # the root body is not included in the returned Jacobians.
-        if robot.is_fixed_base:
+        if self.robot.is_fixed_base:
             ee_jacobi_idx = robot_entity_cfg.body_ids[0] - 1
         else:
             ee_jacobi_idx = robot_entity_cfg.body_ids[0]
@@ -433,99 +511,72 @@ class DataCollection():
         sim_dt = sim.get_physics_dt()
         sim_time = 0.0
 
-        count = 0
+        frame_num = 0
         current_goal_idx = 0
+        goal_pose = modify_ee_goals[0]
 
-        bowl_semantic_id = None
-        food_semantic_id = None
+        # hvae no idea why semantic_filter does not work, so use the id_to_labels to filter first
+        # Find the ID of the bowl in the semantic segmentation
+
+        
+
+        id_to_labels = self.back_camera.data.info[0]["semantic_segmentation"]["idToLabels"]
+        for semantic_id_str, label_info in id_to_labels.items():
+            if label_info.get("class") == "bowl":
+                self.bowl_semantic_id = int(semantic_id_str)
+            if label_info.get("class") == "food":
+                self.food_semantic_id = int(semantic_id_str)
+
+
         # Simulation loop
         while simulation_app.is_running():
             # init set
 
-            goal_pose = modify_ee_goals[current_goal_idx]
-            if count == 0 :
-                # goal_pose = modify_ee_goals[current_goal_idx]
-                joint_vel = robot.data.default_joint_vel.clone()
+            if frame_num <= reset_frame:
+                init_joint =  torch.tensor([[0, 0, 0, 0, 0, 0, 0, 0, 0]], device = sim.device)
+
+                if frame_num == reset_frame :
+                    init_joint =  torch.tensor([[1.77321586, -0.82879892, -1.79624463, -1.65110402, -0.77492251, 1.80433866, -0.78061272, 0, 0]], device = sim.device)
+                    self.cal_spillage_scooped(scene = scene, reset = 1)
+
+                joint_vel = self.robot.data.default_joint_vel.clone()
                 joint_pos = init_joint
                 ik_commands[:] = goal_pose
                 joint_pos_des = joint_pos[:, robot_entity_cfg.joint_ids].clone()
-                # # reset controller
+                # reset controller
                 diff_ik_controller.reset()
                 diff_ik_controller.set_command(ik_commands)
-                robot.write_joint_state_to_sim(joint_pos, joint_vel)
-                robot.reset()
+                self.robot.write_joint_state_to_sim(joint_pos, joint_vel)
+                self.robot.reset()
 
-            sim_current_pose = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
-            real_current_pose = self.eepose_sim2real_offset(sim_current_pose)
-            target_pose = ee_goals[current_goal_idx].unsqueeze(0)
-            dis = torch.norm(target_pose.to('cpu') - real_current_pose.to('cpu'), p=2).item()
-        
-            # scooping speed
-            if count % 10 == 1:
-   
-                # change goal
-                current_goal_idx += 1
-                goal_pose = modify_ee_goals[current_goal_idx]
-
-                joint_pos = robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
-                ik_commands[:] = goal_pose
-                joint_pos_des = joint_pos[:, robot_entity_cfg.joint_ids].clone()
-                # # reset controller
-                diff_ik_controller.reset()
-                diff_ik_controller.set_command(ik_commands)
-
-
-                front_rgb_image  = front_camera.data.output["rgb"][0].cpu().numpy()
-                front_depth_image  = front_camera.data.output["distance_to_image_plane"][0].cpu().numpy()
-                front_seg_image  = front_camera.data.output["semantic_segmentation"][0].cpu().numpy()
-
-                back_rgb_image  = back_camera.data.output["rgb"][0].cpu().numpy()
-                back_depth_image  = back_camera.data.output["distance_to_image_plane"][0].cpu().numpy()
-                back_seg_image  = back_camera.data.output["semantic_segmentation"][0].cpu().numpy()
-
-                
-
-                # hvae no idea why semantic_filter does not work, so use the id_to_labels to filter first
-                # Find the ID of the bowl in the semantic segmentation
-
-                id_to_labels = front_camera.data.info[0]["semantic_segmentation"]["idToLabels"]
-                
-                if bowl_semantic_id or food_semantic_id is None:
-                    for semantic_id_str, label_info in id_to_labels.items():
-                        if label_info.get("class") == "bowl":
-                            bowl_semantic_id = int(semantic_id_str)
-                        if label_info.get("class") == "food":
-                            food_semantic_id = int(semantic_id_str)
+            else :
+                # scooping speed
+                if frame_num % 10 == 0:
     
+                    self.get_info(scene, robot_entity_cfg = robot_entity_cfg)
+                    # change goal
+                    current_goal_idx += 1
+                    goal_pose = modify_ee_goals[current_goal_idx]
 
-                food_pcd = self.Functions.depth_to_point_cloud(front_depth_image[..., 0], front_seg_image[..., 0], object_type = "food", object_id = food_semantic_id)
-                bowl_pcd = self.Functions.depth_to_point_cloud(front_depth_image[..., 0], front_seg_image[..., 0], object_type = "bowl", object_id = bowl_semantic_id)
-                # self.Functions.check_pcd_color(food_pcd)
-                # self.Functions.check_pcd_color(bowl_pcd)
-    
-                # pcd = self.Functions.depth_to_point_cloud(back_depth_image[..., 0], mask=back_seg_image[..., 0], object_id=2)
-                # self.Functions.check_pcd_color(pcd)
-                # front_camera.segantic_filter("class:bowl")
-          
-                # plt.imshow(bowl_rgb_image)
-                # plt.show()
-                # exit()
+                    joint_pos = self.robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
+                    ik_commands[:] = goal_pose
+                    joint_pos_des = joint_pos[:, robot_entity_cfg.joint_ids].clone()
+                    # # reset controller
+                    diff_ik_controller.reset()
+                    diff_ik_controller.set_command(ik_commands)
 
-                self.front_rgb_list[0].append(front_rgb_image)
-                self.front_depth_list[0].append(front_depth_image)
-                self.front_seg_list[0].append(front_seg_image)
 
-                self.back_rgb_list[0].append(back_rgb_image)
-                self.back_depth_list[0].append(back_depth_image)
-                self.back_seg_list[0].append(back_seg_image)
-                
-
+                    if current_goal_idx % self.action_horizon == 0 :
+                        print("current_goal_idx : ", current_goal_idx)
+                        self.cal_spillage_scooped(scene = scene, reset = 0)
+                        import time
+                        time.sleep(3)
    
             # obtain quantities from simulation
-            jacobian = robot.root_physx_view.get_jacobians()[:, ee_jacobi_idx, :, robot_entity_cfg.joint_ids]
-            ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
-            root_pose_w = robot.data.root_state_w[:, 0:7]
-            joint_pos = robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
+            jacobian = self.robot.root_physx_view.get_jacobians()[:, ee_jacobi_idx, :, robot_entity_cfg.joint_ids]
+            ee_pose_w = self.robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
+            root_pose_w = self.robot.data.root_state_w[:, 0:7]
+            joint_pos = self.robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
             # compute frame in root frame
             ee_pos_b, ee_quat_b = subtract_frame_transforms(
                 root_pose_w[:, 0:3], root_pose_w[:, 3:7], ee_pose_w[:, 0:3], ee_pose_w[:, 3:7]
@@ -534,9 +585,9 @@ class DataCollection():
             joint_pos_des = diff_ik_controller.compute(ee_pos_b, ee_quat_b, jacobian, joint_pos)
 
 
-            count += 1  
+            frame_num += 1  
             # apply actions
-            robot.set_joint_position_target(joint_pos_des, joint_ids=robot_entity_cfg.joint_ids)
+            self.robot.set_joint_position_target(joint_pos_des, joint_ids=robot_entity_cfg.joint_ids)
             scene.write_data_to_sim()
             # perform step
             sim.step()
@@ -546,18 +597,11 @@ class DataCollection():
             # update buffers
             scene.update(sim_dt)
 
-            # obtain quantities from simulation
-            ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
-
             # vis offset
+            ee_pose_w = self.robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
             ee_pose_w = self.eepose_sim2real_offset(ee_pose_w)
             ee_marker.visualize(ee_pose_w[:, 0:3], ee_pose_w[:, 3:7])
-            goal_marker.visualize(target_pose[:, 0:3], target_pose[:, 3:7])
-
-            
-      
-            
-     
+            goal_marker.visualize(ee_goals[current_goal_idx].unsqueeze(0)[:, 0:3], ee_goals[current_goal_idx].unsqueeze(0)[:, 3:7])
 
 
     def eepose_sim2real_offset(self, sim_qua_list):
@@ -574,7 +618,7 @@ class DataCollection():
             update_qua = np.array([updata_qua_pose[0], updata_qua_pose[1], updata_qua_pose[2], sim_qua[3], sim_qua[4], sim_qua[5], sim_qua[6]])
             update_qua_list.append(update_qua)
 
-        return torch.tensor(update_qua_list).to(self.device)
+        return torch.tensor(np.array(update_qua_list)).to(self.device)
 
 
     def eepose_real2sim_offset(self, real_qua_list):
@@ -590,8 +634,70 @@ class DataCollection():
             update_qua = np.array([updata_qua_pose[0], updata_qua_pose[1], updata_qua_pose[2], real_qua[3], real_qua[4], real_qua[5], real_qua[6]])
             update_qua_list.append(update_qua)
 
-        return torch.tensor(update_qua_list).to(self.device)
+        return torch.tensor(np.array(update_qua_list)).to(self.device)
     
+    def cal_spillage_scooped(self, env_index = 0, reset = 0, scene = None):
+        # reset = 1 means record init spillage in experiment setting 
+        current_spillage = 0
+        scoop_amount = 0
+
+        rigid_object = scene["rigid_object"].data.body_link_state_w
+        y_pose = rigid_object[:,0, 1].to("cpu")
+        z_pose = rigid_object[:,0, 2].to("cpu")
+
+        spillage_mask = np.logical_or(z_pose < 0, y_pose > -0.02)
+        current_spillage = np.count_nonzero(spillage_mask)
+
+        scoop_mask = np.logical_or(z_pose > 0.15, np.logical_and(z_pose > 0, y_pose > 0))
+        scoop_amount = np.count_nonzero(scoop_mask)
+
+
+
+        
+        if reset == 0:
+         
+            spillage_amount = current_spillage - self.pre_spillage[env_index]
+            # spillage_vol = spillage_amount * (self.ball_radius**3) * 10**9
+            # scoop_vol = scoop_amount * (self.ball_radius**3)* 10**9
+            
+            # if int(spillage_amount) == 0:
+            #     self.binary_spillage[env_index].append(0)
+            # else :
+            #     self.binary_spillage[env_index].append(1)
+    
+            # if int(scoop_amount) == 0:
+            #     self.binary_scoop[env_index].append(0)
+            # else :
+            #     self.binary_scoop[env_index].append(1)
+          
+
+            self.spillage_amount[env_index].append(int(spillage_amount))
+            self.scooped_amount[env_index].append(int(scoop_amount))
+            # self.spillage_vol[env_index].append(int(spillage_vol))
+            # self.scooped_vol[env_index].append(int(scoop_vol))
+            '''
+            if (self.dpose_index[env_index]+1) % 80 == 0 : 
+                split_spillage = sum(self.spillage_vol[env_index][-10:])
+                split_scoop = self.scooped_vol[env_index][-1]
+                spillage_index = self.define_scale(split_spillage, type = "spillage")
+                scoop_index = self.define_scale(split_scoop, type = "scoop")
+
+                for i in range(0, 10):
+                    self.spillage_type[env_index].append(spillage_index) 
+                    self.scooped_type[env_index].append(scoop_index)
+
+                # print(f"spillage_amount : {split_spillage}")
+                # print(f"spillage_type : {self.spillage_type[env_index][-1]}")
+                # print(f"scoop : {self.scooped_type[env_index][-6:]}")
+            '''
+
+
+            print(f"spillage amount :{int(spillage_amount)}")
+            # print(f"spillage vol : {int(spillage_vol)}")
+            print(f"scoop_num : {int(scoop_amount)}")
+            # print(f"scoop_vol : {int(scoop_vol)}")
+        self.pre_spillage[env_index] = int(current_spillage)
+        
 
     
 
