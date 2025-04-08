@@ -359,13 +359,16 @@ class TableTopSceneCfg(InteractiveSceneCfg):
 
 class DataCollection():
     def __init__(self, mean_traj, mean_eepose_euler, mean_eepose_qua):
+
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.mean_traj = mean_traj
         self.mean_eepose_euler = mean_eepose_euler
         self.mean_eepose_qua = mean_eepose_qua
+        self.offset_generate()
 
-        
         self.gt_front = np.load("./real_cam_pose/front_cam2base.npy")
         self.gt_back = np.load("./real_cam_pose/back_cam2base.npy")
+
         self.ref_bowl = np.load("./ref_bowl_pcd.npy")
         self.init_spoon_pcd = np.load("./ori_init_spoon_pcd.npy")
         self.offset_list = np.load("new_pcd_offset_list.npy")
@@ -380,6 +383,7 @@ class DataCollection():
         self.food_semantic_id = None
 
         self.action_horizon = 12
+        
 
         # robot proprioception data
         self.record_ee_pose = [[] for _ in range(self.num_envs)]
@@ -404,10 +408,52 @@ class DataCollection():
         self.scooped_type = [[] for _ in range(self.num_envs)]
         self.binary_spillage = [[] for _ in range(self.num_envs)]
         self.binary_scoop = [[] for _ in range(self.num_envs)]
-
         self.pre_spillage = np.zeros(self.num_envs)
 
-    def get_info(self, scene: InteractiveScene, robot_entity_cfg = None):
+        self.action_space = {
+            "left": torch.Tensor([[[1.],[0.],[0.],[0.],[0.],[0.], [0.]]]).to(self.device),
+            "right" : torch.Tensor([[[-1.],[0.],[0.],[0.],[0.],[0.], [0.]]]).to(self.device),
+            "forward": torch.Tensor([[[0.],[1.],[0.],[0.],[0.],[0.], [0.]]]).to(self.device),
+            "backward": torch.Tensor([[[0.],[-1.],[0.],[0.],[0.],[0.], [0.]]]).to(self.device),
+            "up": torch.Tensor([[[0.],[0.],[1.],[0.],[0.],[0.], [0.]]]).to(self.device),
+            "down": torch.Tensor([[[0.],[0.],[-1.],[0.],[0.],[0.], [0.]]]).to(self.device),
+            "rest": torch.Tensor([[[0.],[0.],[0.],[0.],[0.],[0.], [0.]]]).to(self.device),
+        }
+
+    def offset_generate(self):
+        
+        self.U_index = np.array(random.sample(range(60), random.randint(0, 30))) 
+        self.D_index = np.array(random.sample(range(60), random.randint(0, 15))) 
+        self.L_index = np.array(random.sample(range(len(self.mean_eepose_qua)), random.randint(0, 10)))
+        self.R_index = np.array(random.sample(range(len(self.mean_eepose_qua)), random.randint(20, 20))) 
+        self.B_index = np.array(random.sample(range(len(self.mean_eepose_qua)), random.randint(30, 30))) 
+        self.F_index = np.array(random.sample(range(len(self.mean_eepose_qua)), random.randint(0, 10))) 
+
+    def apply_offset(self, index):
+
+        offset = torch.Tensor([[[0.],[0.],[0.],[0.],[0.],[0.],[0.]]]).to(self.device)
+ 
+        if index in self.L_index :
+            offset +=self.action_space.get("left")
+        
+        if index in self.R_index :
+            offset += self.action_space.get("right")
+
+        if index in self.D_index :
+            offset += self.action_space.get("down")
+
+        if index in self.F_index :
+            offset += self.action_space.get("forward")
+
+        if index in self.B_index :
+            offset += self.action_space.get("backward")
+
+        if index in self.U_index :
+            offset += self.action_space.get("up")
+
+        return offset.squeeze(0).squeeze(-1) / 200
+
+    def get_info(self, robot_entity_cfg = None):
 
 
         front_rgb_image  = self.front_camera.data.output["rgb"][0].cpu().numpy()
@@ -434,11 +480,12 @@ class DataCollection():
         # back_bowl_world = np.hstack((back_bowl_world, object_seg))
 
 
-        # get tool 
+        # get eepose
         sim_current_pose = self.robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
-        sim_cor = sim_current_pose
+        self.record_ee_pose[0].append(sim_current_pose[0].to("cpu"))
 
-        trans_tool = self.pcd_functions.from_ee_to_spoon(sim_cor[0], self.init_spoon_pcd)
+        # get tool 
+        trans_tool = self.pcd_functions.from_ee_to_spoon(sim_current_pose[0], self.init_spoon_pcd)
         object_seg = np.full((trans_tool.shape[0], 1), 1)
         trans_tool = np.hstack((trans_tool, object_seg))
 
@@ -460,6 +507,7 @@ class DataCollection():
 
         self.mix_all_pcd_list[0].append(mix_all_nor_pcd)
 
+    
     def run_simulator(self, sim: sim_utils.SimulationContext, scene: InteractiveScene):
         """Runs the simulation loop."""
         # Extract scene entities
@@ -483,8 +531,7 @@ class DataCollection():
         goal_marker = VisualizationMarkers(frame_marker_cfg.replace(prim_path="/Visuals/ee_goal"))
 
         # real-world trajectory
-        ee_goals = np.load("mean_eepose_qua.npy") 
-        ee_goals = torch.tensor(ee_goals, device=sim.device)
+        ee_goals = torch.tensor(self.mean_eepose_qua, device=sim.device)
 
         # modify the trajectory to simulation
         modify_ee_goals = self.eepose_real2sim_offset(ee_goals)
@@ -512,7 +559,7 @@ class DataCollection():
         sim_time = 0.0
 
         frame_num = 0
-        current_goal_idx = 0
+        current_goal_idx = 1
         goal_pose = modify_ee_goals[0]
 
         # hvae no idea why semantic_filter does not work, so use the id_to_labels to filter first
@@ -553,9 +600,10 @@ class DataCollection():
                 # scooping speed
                 if frame_num % 10 == 0:
     
-                    self.get_info(scene, robot_entity_cfg = robot_entity_cfg)
-                    # change goal
-                    current_goal_idx += 1
+                    self.get_info(robot_entity_cfg)
+                    offset = self.apply_offset(current_goal_idx)
+                    modify_ee_goals += offset
+                    
                     goal_pose = modify_ee_goals[current_goal_idx]
 
                     joint_pos = self.robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
@@ -569,8 +617,14 @@ class DataCollection():
                     if current_goal_idx % self.action_horizon == 0 :
                         print("current_goal_idx : ", current_goal_idx)
                         self.cal_spillage_scooped(scene = scene, reset = 0)
-                        import time
-                        time.sleep(3)
+
+                    # change goal
+                    current_goal_idx += 1
+                    if current_goal_idx == len(modify_ee_goals) :
+                        self.record_info()
+                        break
+              
+                    
    
             # obtain quantities from simulation
             jacobian = self.robot.root_physx_view.get_jacobians()[:, ee_jacobi_idx, :, robot_entity_cfg.joint_ids]
@@ -599,13 +653,64 @@ class DataCollection():
 
             # vis offset
             ee_pose_w = self.robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
-            ee_pose_w = self.eepose_sim2real_offset(ee_pose_w)
+            ee_pose_w = self.eepose_sim2real_offset(ee_pose_w.to("cpu"))
             ee_marker.visualize(ee_pose_w[:, 0:3], ee_pose_w[:, 3:7])
             goal_marker.visualize(ee_goals[current_goal_idx].unsqueeze(0)[:, 0:3], ee_goals[current_goal_idx].unsqueeze(0)[:, 3:7])
 
+    def record_info(self):
+
+        record_len = self.action_horizon * len(self.spillage_amount[0])
+
+        mix_all_pcd = self.list_to_nparray(self.mix_all_pcd_list)[:record_len]
+        sim_eepose = self.list_to_nparray(self.record_ee_pose)[:record_len]
+        real_eepose = self.eepose_sim2real_offset(sim_eepose)[:record_len]
+
+        spillage_amount = self.list_to_nparray(self.spillage_amount)
+        scoop_amount = self.list_to_nparray(self.scooped_amount)
+        spillage_vol = self.list_to_nparray(self.spillage_vol)
+        scoop_vol = self.list_to_nparray(self.scooped_vol)
+        
+        binary_spillage = self.list_to_nparray(self.binary_spillage)
+        binary_scoop = self.list_to_nparray(self.binary_scoop)
+
+        
+
+        # if sum(binary_spillage) > 2 :
+        #     weight_spillage = np.ones(8)
+        # else : 
+        #     weight_spillage = binary_spillage
+        
+
+        
+        
+        # # [1:] means delete the first init scene
+        # data_dict = {
+        #     'eepose' : real_eepose,
+        #     'mix_all_pcd' : mix_all_pcd,
+        #     'spillage_amount': spillage_amount,
+        #     'spillage_vol': spillage_vol,
+        #     'binary_spillage' : binary_spillage,
+        #     'scoop_amount': scoop_amount,
+        #     'scoop_vol': scoop_vol,
+        #     'binary_scoop' : binary_scoop,
+
+        #     'radius' : self.ball_radius,
+        #     'mass' : self.ball_mass,
+        #     'friction' : self.ball_friction,
+        #     'amount' : self.ball_amount,
+        #     'shape' : self.food_label,
+        # }
+
+        # # store the data
+        # with h5py.File(f'{f"/media/hcis-s25/data/GRITS/spillage_dataset/all_process/time_{self.count}"}.h5', 'w') as h5file:
+        #     for key, value in data_dict.items():
+        #         h5file.create_dataset(key, data=value)
+            
+
+
 
     def eepose_sim2real_offset(self, sim_qua_list):
-        sim_qua_list = sim_qua_list.to("cpu")
+
         update_qua_list = []
 
         for sim_qua in sim_qua_list:
@@ -652,7 +757,6 @@ class DataCollection():
         scoop_amount = np.count_nonzero(scoop_mask)
 
 
-
         
         if reset == 0:
          
@@ -660,45 +764,41 @@ class DataCollection():
             # spillage_vol = spillage_amount * (self.ball_radius**3) * 10**9
             # scoop_vol = scoop_amount * (self.ball_radius**3)* 10**9
             
-            # if int(spillage_amount) == 0:
-            #     self.binary_spillage[env_index].append(0)
-            # else :
-            #     self.binary_spillage[env_index].append(1)
+            if int(spillage_amount) == 0:
+                self.binary_spillage[env_index].append(0)
+            else :
+                self.binary_spillage[env_index].append(1)
     
-            # if int(scoop_amount) == 0:
-            #     self.binary_scoop[env_index].append(0)
-            # else :
-            #     self.binary_scoop[env_index].append(1)
+            if int(scoop_amount) == 0:
+                self.binary_scoop[env_index].append(0)
+            else :
+                self.binary_scoop[env_index].append(1)
           
 
             self.spillage_amount[env_index].append(int(spillage_amount))
             self.scooped_amount[env_index].append(int(scoop_amount))
             # self.spillage_vol[env_index].append(int(spillage_vol))
             # self.scooped_vol[env_index].append(int(scoop_vol))
-            '''
-            if (self.dpose_index[env_index]+1) % 80 == 0 : 
-                split_spillage = sum(self.spillage_vol[env_index][-10:])
-                split_scoop = self.scooped_vol[env_index][-1]
-                spillage_index = self.define_scale(split_spillage, type = "spillage")
-                scoop_index = self.define_scale(split_scoop, type = "scoop")
-
-                for i in range(0, 10):
-                    self.spillage_type[env_index].append(spillage_index) 
-                    self.scooped_type[env_index].append(scoop_index)
-
-                # print(f"spillage_amount : {split_spillage}")
-                # print(f"spillage_type : {self.spillage_type[env_index][-1]}")
-                # print(f"scoop : {self.scooped_type[env_index][-6:]}")
-            '''
 
 
             print(f"spillage amount :{int(spillage_amount)}")
-            # print(f"spillage vol : {int(spillage_vol)}")
             print(f"scoop_num : {int(scoop_amount)}")
-            # print(f"scoop_vol : {int(scoop_vol)}")
+       
         self.pre_spillage[env_index] = int(current_spillage)
         
+    def list_to_nparray(self, lists):
+        temp_array = []
 
+        for i in range(len(lists)):
+            temp_array.append(np.array(lists[i]))
+
+        temp = np.stack(temp_array, axis=0)
+
+        shape = temp.shape
+        new_shape = (shape[0] * shape[1],) + shape[2:]
+        temp_1 = temp.reshape(new_shape )
+ 
+        return temp_1
     
 
 
@@ -717,7 +817,9 @@ def main():
     # Now we are ready!
     print("[INFO]: Setup complete...")
     # Run the simulator
-    env = DataCollection(mean_traj=None, mean_eepose_euler=None, mean_eepose_qua=None)
+
+    ee_goals = np.load("mean_eepose_qua.npy")[20:160]
+    env = DataCollection(mean_traj=None, mean_eepose_euler=None, mean_eepose_qua=ee_goals)
     env.run_simulator(sim, scene)
 
 
