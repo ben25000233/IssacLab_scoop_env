@@ -21,6 +21,7 @@ simulation_app = app_launcher.app
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+import h5py
 
 
 import isaaclab.sim as sim_utils
@@ -61,12 +62,24 @@ import random
 import tqdm
 from scipy.spatial.transform import Rotation as Rot
 import open3d as o3d
+import yaml
 
 def add_soft(): 
 
-    radius = 0.015
-    soft_origins = define_origins(n = 3, layer = 3, spacing=radius * 2)
-    str_usd_path ="/home/hcis-s22/benyang/IsaacLab/source/isaaclab_assets/data/str.usd"
+    r_radius = round(random.uniform(0.0025, 0.01), 4)
+    l_radius = round(random.uniform(0.0025, 0.01), 4)
+    mass = round(random.uniform(0.0001, 0.005), 4)
+    friction = round(random.uniform(0, 1),2)
+    max_num = int(256/pow(2, (r_radius - 0.0025)*1000)) 
+    amount = random.randint(1, max(1, max_num))+2
+
+    amount = 2
+    r_radius = 0.008
+    l_radius = 0.008
+
+    # youngs_modulus = round(random.uniform(0.0001, 0.005), 4)
+
+    soft_origins = define_origins(n = 4, layer = amount, spacing=max(r_radius, l_radius) * 2.1)
 
 
     # Define deformable material properties (required for soft bodies)
@@ -74,19 +87,51 @@ def add_soft():
         youngs_modulus=1e5,
         poissons_ratio=0.4,
         density=None,  # Optional
-        elasticity_damping=0.00001
+        elasticity_damping=0.00001,
+        dynamic_friction = friction,
     )
 
     # ----use predefine Sphere shape 
     cfg_sphere = sim_utils.MeshSphereCfg(
-        radius=radius,
+        radius=r_radius,
         deformable_props=sim_utils.DeformableBodyPropertiesCfg(rest_offset=0.0),
-        visual_material=sim_utils.PreviewSurfaceCfg(),
-        physics_material = soft_material
+        mass_props=sim_utils.MassPropertiesCfg(mass=mass),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 1.0)),
+        physics_material = soft_material,
     )
+
+    cfg_cube = sim_utils.MeshCuboidCfg(
+        size=(r_radius * 2, r_radius * 2, l_radius * 2),
+        # hight=l_radius * 2,
+        deformable_props=sim_utils.DeformableBodyPropertiesCfg(rest_offset=0.0),
+        mass_props=sim_utils.MassPropertiesCfg(mass=mass),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 1.0)),
+        physics_material = soft_material,
+    )
+
+    cfg_cone = sim_utils.MeshConeCfg(
+        radius=r_radius,
+        height=l_radius* 2,
+        deformable_props=sim_utils.DeformableBodyPropertiesCfg(rest_offset=0.0),
+        mass_props=sim_utils.MassPropertiesCfg(mass=mass),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 1.0)),
+        physics_material = soft_material,
+    )
+
+    cfg_cylinder = sim_utils.MeshCylinderCfg(
+        radius=r_radius,
+        height=l_radius* 2,
+        deformable_props=sim_utils.DeformableBodyPropertiesCfg(rest_offset=0.0),
+        mass_props=sim_utils.MassPropertiesCfg(mass=mass),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 1.0)),
+        physics_material = soft_material,
+
+    )
+
+
     
+    '''
     # ----use own usd 
-    
     # Define MeshCfg for the soft body
     soft_body_cfg = sim_utils.MeshCfg(
         visual_material=sim_utils.PreviewSurfaceCfg(),  # Assign visual material 
@@ -101,9 +146,14 @@ def add_soft():
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.1, 0.0)),
             scale = (0.1, 0.1, 0.1)
             )
+    '''
 
     # ---- determine which cfg file be used (cfg_sphere / str_cfg)
-    obj_cfg = cfg_sphere
+    shapes = [cfg_sphere, cfg_cube, cfg_cone, cfg_cylinder]
+    obj_cfg = random.choice(shapes)
+    # obj_cfg = cfg_cylinder
+
+    obj_cfg.semantic_tags = [("class", "food")]
 
 
     for idx, origin in tqdm.tqdm(enumerate(soft_origins), total=len(soft_origins)):
@@ -121,58 +171,72 @@ def add_soft():
 
 def add_rigid(): 
 
-    radius = 0.015
-    rigid_origins = define_origins(n = 3, layer = 3, spacing=radius * 2)
-    str_usd_path ="/home/hcis-s22/benyang/IsaacLab/source/isaaclab_assets/data/str.usd"
+    r_radius = round(random.uniform(0.0025, 0.01), 4)
+    l_radius = round(random.uniform(0.0025, 0.01), 4)
+    mass = round(random.uniform(0.0001, 0.005), 4)
+    friction = round(random.uniform(0, 1),2)
+    max_num = int(256/pow(2, (r_radius - 0.0025)*1000)) 
+    amount = random.randint(1, max(1, max_num))+2
+
+    amount = 1
+
+
+    rigid_origins = define_origins(n = 5, layer = amount, spacing=max(r_radius, l_radius) * 2)
+    # str_usd_path ="/home/hcis-s22/benyang/IsaacLab/source/isaaclab_assets/data/str.usd"
 
 
     cfg_sphere = sim_utils.SphereCfg(
-        radius = radius,
+        radius = r_radius,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-        mass_props=sim_utils.MassPropertiesCfg(mass=0.001),
+        mass_props=sim_utils.MassPropertiesCfg(mass=mass),
         collision_props=sim_utils.CollisionPropertiesCfg(),
         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 1.0)),
-
+        physics_material = sim_utils.RigidBodyMaterialCfg(static_friction=friction, dynamic_friction=friction),
     )
 
     cfg_cube = sim_utils.CuboidCfg(
-        size=(radius, radius, radius),
+        size=(r_radius*2, r_radius*2, l_radius*2),
         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
         mass_props=sim_utils.MassPropertiesCfg(mass=0.001),
         collision_props=sim_utils.CollisionPropertiesCfg(),
         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 1.0)),
+        physics_material = sim_utils.RigidBodyMaterialCfg(static_friction=friction, dynamic_friction=friction),
     )
 
     cfg_cone = sim_utils.ConeCfg(
-        radius=radius,
-        height=radius,
+        radius=r_radius,
+        height=l_radius*2,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
         mass_props=sim_utils.MassPropertiesCfg(mass=0.001),
         collision_props=sim_utils.CollisionPropertiesCfg(),
         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 1.0)),
+        physics_material = sim_utils.RigidBodyMaterialCfg(static_friction=friction, dynamic_friction=friction),
     )
 
     cfg_cylinder = sim_utils.CylinderCfg(
-        radius=radius,
-        height=radius,
+        radius=r_radius,
+        height=l_radius*2,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
         mass_props=sim_utils.MassPropertiesCfg(mass=0.001),
         collision_props=sim_utils.CollisionPropertiesCfg(),
         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 1.0)),
+        physics_material = sim_utils.RigidBodyMaterialCfg(static_friction=friction, dynamic_friction=friction),
     )
 
 
-    str_cfg = sim_utils.UsdFileCfg(
-        usd_path=str_usd_path, 
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-        # mass_props=sim_utils.MassPropertiesCfg(mass=0.001),
-        # collision_props=sim_utils.CollisionPropertiesCfg(),
-        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.1, 0.0)),
-        scale = (0.1, 0.1, 0.1), 
-    )
+    # str_cfg = sim_utils.UsdFileCfg(
+    #     usd_path=str_usd_path, 
+    #     rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+    #     # mass_props=sim_utils.MassPropertiesCfg(mass=0.001),
+    #     # collision_props=sim_utils.CollisionPropertiesCfg(),
+    #     visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.1, 0.0)),
+    #     scale = (0.1, 0.1, 0.1), 
+    # )
 
+    shapes = [cfg_sphere, cfg_cube, cfg_cone, cfg_cylinder]
+    obj_cfg = random.choice(shapes)
+    # obj_cfg = cfg_cylinder
 
-    obj_cfg = cfg_cylinder
     obj_cfg.semantic_tags = [("class", "food")]
 
 
@@ -188,6 +252,7 @@ def add_rigid():
         # debug_vis=True,
     )
 
+    # return rigid_cfg, food_info
     return rigid_cfg
 
 def add_camera(cam_type = "front"):
@@ -199,6 +264,8 @@ def add_camera(cam_type = "front"):
     back_cam_pose = np.load("./real_cam_pose/back_cam2base.npy")
     back_cam_pos = back_cam_pose[0:3, 3]
     back_cam_rot = Rot.from_matrix(back_cam_pose[0:3, 0:3]).as_quat()
+
+    focal_length = 16.6
 
     if cam_type == "front":
         cam_pos = (front_cam_pos[0], front_cam_pos[1], front_cam_pos[2])
@@ -221,10 +288,9 @@ def add_camera(cam_type = "front"):
         colorize_instance_id_segmentation=False,
         colorize_instance_segmentation=False,
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=15.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
+            focal_length=focal_length, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
         ),
         offset=CameraCfg.OffsetCfg(pos=cam_pos, rot=cam_rot, convention="ros"),
-        semantic_filter = "class:bowl",
     )
     else:
         cam_pos = (back_cam_pos[0], back_cam_pos[1], back_cam_pos[2])
@@ -247,7 +313,8 @@ def add_camera(cam_type = "front"):
         colorize_instance_id_segmentation=False,
         colorize_instance_segmentation=False,
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=8, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
+            # focal_length=19.6, focus_distance=400.0, horizontal_aperture=20.955, 
+            focal_length=focal_length, focus_distance=400.0, horizontal_aperture=20.955, 
         ),
 
         offset=CameraCfg.OffsetCfg(pos=cam_pos, rot=cam_rot, convention="ros"),
@@ -257,7 +324,6 @@ def add_camera(cam_type = "front"):
 
     return camera
 
-    
 def define_origins(n: int, layer: int, spacing: float) -> list[list[float]]:
     """
     Defines the origins of a 3D grid with n * n particles per layer and m layers stacked along the z-axis.
@@ -295,7 +361,6 @@ def define_origins(n: int, layer: int, spacing: float) -> list[list[float]]:
     return env_origins.tolist()
 
 
-
 @configclass
 class TableTopSceneCfg(InteractiveSceneCfg):
     """Configuration for a cart-pole scene."""
@@ -304,7 +369,7 @@ class TableTopSceneCfg(InteractiveSceneCfg):
     ground = AssetBaseCfg(
         prim_path="/World/defaultGroundPlane",
         spawn=sim_utils.GroundPlaneCfg(),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -1)),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, 0)),
     )
 
     # lights
@@ -314,15 +379,15 @@ class TableTopSceneCfg(InteractiveSceneCfg):
 
     # mount
 
-    table = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/Table",
-        spawn=sim_utils.CuboidCfg(
-                    size=(2, 2, 1),
-                    # visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0), metallic=0.2),
-                    rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
-                ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.5)),
-    )
+    # table = AssetBaseCfg(
+    #     prim_path="{ENV_REGEX_NS}/Table",
+    #     spawn=sim_utils.CuboidCfg(
+    #                 size=(2, 2, 1),
+    #                 # visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0), metallic=0.2),
+    #                 rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+    #             ),
+    #     init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.5)),
+    # )
 
     # articulation
 
@@ -332,6 +397,7 @@ class TableTopSceneCfg(InteractiveSceneCfg):
     # soft_object = add_soft()
 
     rigid_object = add_rigid()
+    # rigid_object, food_info = add_rigid()
 
 
     front_camera = add_camera("front")
@@ -349,30 +415,39 @@ class TableTopSceneCfg(InteractiveSceneCfg):
             collision_props=sim_utils.CollisionPropertiesCfg(),
             semantic_tags = [("class", "bowl"), ("id", "2")],
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.59, -0.11, 0.04)),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.575, -0.11, 0.025)),
     )
 
 
 
-
-
-
 class DataCollection():
-    def __init__(self, mean_traj, mean_eepose_euler, mean_eepose_qua):
+    def __init__(self, mean_eepose_qua, init_pose = None, food_info = None):
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.mean_traj = mean_traj
-        self.mean_eepose_euler = mean_eepose_euler
+
+        self.franka_init_pose = init_pose
         self.mean_eepose_qua = mean_eepose_qua
         self.offset_generate()
 
         self.gt_front = np.load("./real_cam_pose/front_cam2base.npy")
         self.gt_back = np.load("./real_cam_pose/back_cam2base.npy")
 
-        self.ref_bowl = np.load("./ref_bowl_pcd.npy")
+        # need modify
+        self.ref_bowl = np.load("./real_food.npy")
+
         self.init_spoon_pcd = np.load("./ori_init_spoon_pcd.npy")
         self.offset_list = np.load("new_pcd_offset_list.npy")
         
+        self.config_file = "./collect_time.yaml"
+
+        with open(self.config_file, 'r') as file:
+            self.config = yaml.safe_load(file)
+
+        self.count = int(self.config['count'])
+        count = int(self.count) + 1
+        self.config['count'] = count
+        with open(self.config_file, 'w') as file:
+            yaml.safe_dump(self.config, file)
 
         self.eepose_offset = 0.045
         self.pcd_functions = Pcd_functions()
@@ -383,6 +458,8 @@ class DataCollection():
         self.food_semantic_id = None
 
         self.action_horizon = 12
+
+        # self.r_radius, self.l_radius, self.mass, self.friction  = food_info
         
 
         # robot proprioception data
@@ -422,14 +499,18 @@ class DataCollection():
 
     def offset_generate(self):
         
-        self.U_index = np.array(random.sample(range(60), random.randint(0, 30))) 
-        self.D_index = np.array(random.sample(range(60), random.randint(0, 15))) 
-        self.L_index = np.array(random.sample(range(len(self.mean_eepose_qua)), random.randint(0, 10)))
-        self.R_index = np.array(random.sample(range(len(self.mean_eepose_qua)), random.randint(20, 20))) 
-        self.B_index = np.array(random.sample(range(len(self.mean_eepose_qua)), random.randint(30, 30))) 
-        self.F_index = np.array(random.sample(range(len(self.mean_eepose_qua)), random.randint(0, 10))) 
+        # need to modify the offset
+        front_step = 20
+        self.U_index = np.array(random.sample(range(len(self.mean_eepose_qua)- front_step), random.randint(0, 50))) + front_step
+        self.D_index = np.array(random.sample(range(len(self.mean_eepose_qua)- front_step), random.randint(0, 50))) + front_step
+        self.L_index = np.array(random.sample(range(len(self.mean_eepose_qua)- front_step), random.randint(0, 50))) + front_step
+        self.R_index = np.array(random.sample(range(len(self.mean_eepose_qua)- front_step), random.randint(0, 50))) + front_step
+        self.B_index = np.array(random.sample(range(len(self.mean_eepose_qua)- front_step), random.randint(0, 50))) + front_step
+        self.F_index = np.array(random.sample(range(len(self.mean_eepose_qua)- front_step), random.randint(0, 50))) + front_step
 
     def apply_offset(self, index):
+
+        offset_weight = 600
 
         offset = torch.Tensor([[[0.],[0.],[0.],[0.],[0.],[0.],[0.]]]).to(self.device)
  
@@ -451,7 +532,7 @@ class DataCollection():
         if index in self.U_index :
             offset += self.action_space.get("up")
 
-        return offset.squeeze(0).squeeze(-1) / 200
+        return offset.squeeze(0).squeeze(-1) / offset_weight
 
     def get_info(self, robot_entity_cfg = None):
 
@@ -464,9 +545,9 @@ class DataCollection():
         back_depth_image  = self.back_camera.data.output["distance_to_image_plane"][0].cpu().numpy()
         back_seg_image  = self.back_camera.data.output["semantic_segmentation"][0].cpu().numpy()
 
-        # plt.imshow(back_depth_image)
+        # plt.imshow(front_rgb_image)
         # plt.show()
-        # exit()
+        # simulation_app.close()
 
 
         food_pcd = self.pcd_functions.depth_to_point_cloud(back_depth_image[..., 0], back_seg_image[..., 0], object_type = "food", object_id = self.food_semantic_id)
@@ -474,10 +555,18 @@ class DataCollection():
         object_seg = np.full((back_food_world.shape[0], 1), 2)
         back_food_world = np.hstack((back_food_world, object_seg))
 
-        # bowl_pcd = self.pcd_functions.depth_to_point_cloud(back_depth_image[..., 0], back_seg_image[..., 0], object_type = "bowl", object_id = self.bowl_semantic_id)
-        # back_bowl_world = self.pcd_functions.transform_to_world(bowl_pcd[:, :3], self.gt_back)
-        # object_seg = np.full((back_bowl_world.shape[0], 1), 4)
-        # back_bowl_world = np.hstack((back_bowl_world, object_seg))
+        bowl_pcd = self.pcd_functions.depth_to_point_cloud(back_depth_image[..., 0], back_seg_image[..., 0], object_type = "bowl", object_id = self.bowl_semantic_id)
+        back_bowl_world = self.pcd_functions.transform_to_world(bowl_pcd[:, :3], self.gt_back)
+        # object_seg must be 4
+        object_seg = np.full((back_bowl_world.shape[0], 1), 3)
+        back_bowl_world = np.hstack((back_bowl_world, object_seg))
+
+
+        bowl_pcd = self.pcd_functions.depth_to_point_cloud(front_depth_image[..., 0], front_seg_image[..., 0], object_type = "bowl", object_id = self.bowl_semantic_id)
+        front_bowl_world = self.pcd_functions.transform_to_world(bowl_pcd[:, :3], self.gt_front)
+        # object_seg must be 4
+        object_seg = np.full((front_bowl_world.shape[0], 1), 5)
+        front_bowl_world = np.hstack((front_bowl_world, object_seg))
 
 
         # get eepose
@@ -489,11 +578,12 @@ class DataCollection():
         object_seg = np.full((trans_tool.shape[0], 1), 1)
         trans_tool = np.hstack((trans_tool, object_seg))
 
-        mix_all_pcd = np.concatenate(( trans_tool, back_food_world, self.ref_bowl), axis=0)
-        # mix_all_pcd = np.concatenate((back_food_world, trans_tool), axis=0)
+        # mix_all_pcd = np.concatenate(( trans_tool, back_food_world, self.ref_bowl), axis=0)
+        mix_all_pcd = np.concatenate((back_bowl_world, self.ref_bowl, front_bowl_world), axis=0)
         mix_all_pcd = self.pcd_functions.align_point_cloud(mix_all_pcd, target_points = 30000)
         mix_all_nor_pcd = self.pcd_functions.nor_pcd(mix_all_pcd)
-        # self.pcd_functions.check_pcd_color(mix_all_nor_pcd)
+        self.pcd_functions.check_pcd_color(mix_all_nor_pcd)
+        simulation_app.close()
 
 
     
@@ -517,7 +607,7 @@ class DataCollection():
         self.back_camera = scene["back_camera"]
         self.device = sim.device
 
-        reset_frame = 70
+        reset_frame = 105
 
 
         # Create controller
@@ -578,13 +668,14 @@ class DataCollection():
         # Simulation loop
         while simulation_app.is_running():
             # init set
-
+            print(f"frame_num: {frame_num}")
             if frame_num <= reset_frame:
                 init_joint =  torch.tensor([[0, 0, 0, 0, 0, 0, 0, 0, 0]], device = sim.device)
 
                 if frame_num == reset_frame :
-                    init_joint =  torch.tensor([[1.77321586, -0.82879892, -1.79624463, -1.65110402, -0.77492251, 1.80433866, -0.78061272, 0, 0]], device = sim.device)
-                    self.cal_spillage_scooped(scene = scene, reset = 1)
+                    # init_joint =  torch.tensor([[1.77321586, -0.82879892, -1.79624463, -1.65110402, -0.77492251, 1.80433866, -0.78061272, 0, 0]], device = sim.device)
+                    init_joint =  torch.tensor(self.franka_init_pose, device = sim.device)
+                    # self.cal_spillage_scooped(scene = scene, reset = 1)
 
                 joint_vel = self.robot.data.default_joint_vel.clone()
                 joint_pos = init_joint
@@ -598,7 +689,7 @@ class DataCollection():
 
             else :
                 # scooping speed
-                if frame_num % 10 == 0:
+                if frame_num % 5 == 0:
     
                     self.get_info(robot_entity_cfg)
                     offset = self.apply_offset(current_goal_idx)
@@ -616,10 +707,10 @@ class DataCollection():
 
                     if current_goal_idx % self.action_horizon == 0 :
                         print("current_goal_idx : ", current_goal_idx)
-                        self.cal_spillage_scooped(scene = scene, reset = 0)
+                        # self.cal_spillage_scooped(scene = scene, reset = 0)
 
                     # change goal
-                    current_goal_idx += 1
+                    current_goal_idx += 0
                     if current_goal_idx == len(modify_ee_goals) :
                         self.record_info()
                         break
@@ -651,19 +742,21 @@ class DataCollection():
             # update buffers
             scene.update(sim_dt)
 
+            '''
             # vis offset
             ee_pose_w = self.robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
             ee_pose_w = self.eepose_sim2real_offset(ee_pose_w.to("cpu"))
             ee_marker.visualize(ee_pose_w[:, 0:3], ee_pose_w[:, 3:7])
             goal_marker.visualize(ee_goals[current_goal_idx].unsqueeze(0)[:, 0:3], ee_goals[current_goal_idx].unsqueeze(0)[:, 3:7])
-
+            '''
+            
     def record_info(self):
 
         record_len = self.action_horizon * len(self.spillage_amount[0])
 
         mix_all_pcd = self.list_to_nparray(self.mix_all_pcd_list)[:record_len]
         sim_eepose = self.list_to_nparray(self.record_ee_pose)[:record_len]
-        real_eepose = self.eepose_sim2real_offset(sim_eepose)[:record_len]
+        real_eepose = self.eepose_sim2real_offset(sim_eepose)[:record_len].to("cpu")
 
         spillage_amount = self.list_to_nparray(self.spillage_amount)
         scoop_amount = self.list_to_nparray(self.scooped_amount)
@@ -673,7 +766,7 @@ class DataCollection():
         binary_spillage = self.list_to_nparray(self.binary_spillage)
         binary_scoop = self.list_to_nparray(self.binary_scoop)
 
-        
+        # r_radius, l_radius, mass, friction = self.food_info
 
         # if sum(binary_spillage) > 2 :
         #     weight_spillage = np.ones(8)
@@ -683,28 +776,29 @@ class DataCollection():
 
         
         
-        # # [1:] means delete the first init scene
-        # data_dict = {
-        #     'eepose' : real_eepose,
-        #     'mix_all_pcd' : mix_all_pcd,
-        #     'spillage_amount': spillage_amount,
-        #     'spillage_vol': spillage_vol,
-        #     'binary_spillage' : binary_spillage,
-        #     'scoop_amount': scoop_amount,
-        #     'scoop_vol': scoop_vol,
-        #     'binary_scoop' : binary_scoop,
+   
+        data_dict = {
+            'eepose' : real_eepose,
+            'mix_all_pcd' : mix_all_pcd,
+            'spillage_amount': spillage_amount,
+            # 'spillage_vol': spillage_vol,
+            'binary_spillage' : binary_spillage,
+            'scoop_amount': scoop_amount,
+            # 'scoop_vol': scoop_vol,
+            'binary_scoop' : binary_scoop,
+            # 'r_radius' : self.r_radius,
+            # 'l_radius' : self.l_radius,
+            # 'mass' : self.mass,
+            # 'friction' : self.friction,
 
-        #     'radius' : self.ball_radius,
-        #     'mass' : self.ball_mass,
-        #     'friction' : self.ball_friction,
-        #     'amount' : self.ball_amount,
-        #     'shape' : self.food_label,
-        # }
+            # 'amount' : self.ball_amount,
+            # 'shape' : self.food_label,
+        }
 
-        # # store the data
-        # with h5py.File(f'{f"/media/hcis-s25/data/GRITS/spillage_dataset/all_process/time_{self.count}"}.h5', 'w') as h5file:
-        #     for key, value in data_dict.items():
-        #         h5file.create_dataset(key, data=value)
+        # store the data
+        with h5py.File(f'{f"/media/hcis-s22/data/spillage_dataset/time_{self.count}"}.h5', 'w') as h5file:
+            for key, value in data_dict.items():
+                h5file.create_dataset(key, data=value)
             
 
 
@@ -811,6 +905,8 @@ def main():
     sim.set_camera_view([1.5, 0, 0.8], [0.0, 0.0, 0.0])
     # Design scene
     scene_cfg = TableTopSceneCfg(num_envs=args_cli.num_envs, env_spacing=2.0)
+    # food_info = scene_cfg.food_info
+ 
     scene = InteractiveScene(scene_cfg)
     # Play the simulator
     sim.reset()
@@ -818,8 +914,15 @@ def main():
     print("[INFO]: Setup complete...")
     # Run the simulator
 
-    ee_goals = np.load("mean_eepose_qua.npy")[20:160]
-    env = DataCollection(mean_traj=None, mean_eepose_euler=None, mean_eepose_qua=ee_goals)
+    start_step = 0
+    franka_init_pose = np.load("mean_traj.npy")[start_step]
+    franka_init_pose = np.append(franka_init_pose, 0)
+    franka_init_pose = np.append(franka_init_pose, 0)
+    franka_init_pose = torch.tensor(franka_init_pose, dtype=torch.float32).unsqueeze(0)
+
+    ee_goals = np.load("mean_eepose_qua.npy")[start_step:160]
+
+    env = DataCollection(mean_eepose_qua=ee_goals, init_pose = franka_init_pose, food_info = None)
     env.run_simulator(sim, scene)
 
 
@@ -827,4 +930,6 @@ if __name__ == "__main__":
     # run the main function
     main()
     # close sim app
+    # modify IsaacLab/source/isaaclab/isaaclab/sim/simulation_context.py line 658 to shud down the app immediately
     simulation_app.close()
+    
