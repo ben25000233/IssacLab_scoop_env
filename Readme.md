@@ -31,7 +31,7 @@ Set the `usd_dir` variable :  usd_dir = "/home/user-name/{path}/IsaacLab/source/
 
 ---
 ## ▶️ Run the Simulation
-python interactive_scene.py
+python interactivate_scene.py.py
 
 
 
