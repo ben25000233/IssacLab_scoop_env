@@ -36,6 +36,7 @@ from isaaclab.utils.math import subtract_frame_transforms
 import isaacsim.core.utils.prims as prim_utils
 
 from isaaclab.sensors import CameraCfg, TiledCameraCfg
+from isaaclab.sim.converters import UrdfConverterCfg
 
 from pcd_functions import Pcd_functions
 
@@ -178,7 +179,6 @@ def add_rigid():
     max_num = int(256/pow(2, (r_radius - 0.0025)*1000)) 
     amount = random.randint(1, max(1, max_num))+2
 
-    amount = 1
 
 
     rigid_origins = define_origins(n = 5, layer = amount, spacing=max(r_radius, l_radius) * 2)
@@ -369,7 +369,7 @@ class TableTopSceneCfg(InteractiveSceneCfg):
     ground = AssetBaseCfg(
         prim_path="/World/defaultGroundPlane",
         spawn=sim_utils.GroundPlaneCfg(),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, 0)),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -1)),
     )
 
     # lights
@@ -379,34 +379,33 @@ class TableTopSceneCfg(InteractiveSceneCfg):
 
     # mount
 
-    # table = AssetBaseCfg(
-    #     prim_path="{ENV_REGEX_NS}/Table",
-    #     spawn=sim_utils.CuboidCfg(
-    #                 size=(2, 2, 1),
-    #                 # visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0), metallic=0.2),
-    #                 rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
-    #             ),
-    #     init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.5)),
-    # )
+    table = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Table",
+        spawn=sim_utils.CuboidCfg(
+                    size=(2, 2, 1),
+                    # visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0), metallic=0.2),
+                    rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+                ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.5)),
+    )
 
     # articulation
 
+    # robot = SCOOP_FRANKA_CFG.replace(prim_path="/World/envs/env_.*/Robot")
     robot = SCOOP_FRANKA_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
     # soft body
     # soft_object = add_soft()
 
-    rigid_object = add_rigid()
+    # rigid_object = add_rigid()
     # rigid_object, food_info = add_rigid()
 
 
     front_camera = add_camera("front")
     back_camera = add_camera("back")
 
-    
- 
     bowl = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/bowl",
+        prim_path="/World/envs/env_.*/bowl",
         spawn=sim_utils.UsdFileCfg(
             usd_path="/home/hcis-s22/benyang/IsaacLab/source/isaaclab_assets/data/tool/bowl/s_bowl.usd", 
             scale=(1, 1, 1), 
@@ -432,8 +431,8 @@ class DataCollection():
         self.gt_front = np.load("./real_cam_pose/front_cam2base.npy")
         self.gt_back = np.load("./real_cam_pose/back_cam2base.npy")
 
-        # need modify
-        self.ref_bowl = np.load("./real_food.npy")
+        self.ref_bowl = np.load("./ref_bowl_pcd.npy")
+        self.real_food = np.load("./real_food.npy")
 
         self.init_spoon_pcd = np.load("./ori_init_spoon_pcd.npy")
         self.offset_list = np.load("new_pcd_offset_list.npy")
@@ -545,7 +544,7 @@ class DataCollection():
         back_depth_image  = self.back_camera.data.output["distance_to_image_plane"][0].cpu().numpy()
         back_seg_image  = self.back_camera.data.output["semantic_segmentation"][0].cpu().numpy()
 
-        # plt.imshow(front_rgb_image)
+        # plt.imshow(back_rgb_image)
         # plt.show()
         # simulation_app.close()
 
@@ -562,11 +561,14 @@ class DataCollection():
         back_bowl_world = np.hstack((back_bowl_world, object_seg))
 
 
-        bowl_pcd = self.pcd_functions.depth_to_point_cloud(front_depth_image[..., 0], front_seg_image[..., 0], object_type = "bowl", object_id = self.bowl_semantic_id)
-        front_bowl_world = self.pcd_functions.transform_to_world(bowl_pcd[:, :3], self.gt_front)
-        # object_seg must be 4
-        object_seg = np.full((front_bowl_world.shape[0], 1), 5)
-        front_bowl_world = np.hstack((front_bowl_world, object_seg))
+        # bowl_pcd = self.pcd_functions.depth_to_point_cloud(front_depth_image[..., 0], front_seg_image[..., 0], object_type = "bowl", object_id = self.bowl_semantic_id)
+        # front_bowl_world = self.pcd_functions.transform_to_world(bowl_pcd[:, :3], self.gt_front)
+        # object_seg = np.full((front_bowl_world.shape[0], 1), 4)
+        # front_bowl_world = np.hstack((front_bowl_world, object_seg))
+        # front_bowl_world = self.pcd_functions.align_point_cloud(front_bowl_world, target_points = 10000)
+        # np.save(f"ref_bowl_pcd.npy", front_bowl_world) 
+        # self.pcd_functions.check_pcd_color(front_bowl_world)
+        # simulation_app.close()
 
 
         # get eepose
@@ -579,11 +581,12 @@ class DataCollection():
         trans_tool = np.hstack((trans_tool, object_seg))
 
         # mix_all_pcd = np.concatenate(( trans_tool, back_food_world, self.ref_bowl), axis=0)
-        mix_all_pcd = np.concatenate((back_bowl_world, self.ref_bowl, front_bowl_world), axis=0)
+        mix_all_pcd = np.concatenate((back_bowl_world, self.real_food), axis=0)
         mix_all_pcd = self.pcd_functions.align_point_cloud(mix_all_pcd, target_points = 30000)
         mix_all_nor_pcd = self.pcd_functions.nor_pcd(mix_all_pcd)
-        self.pcd_functions.check_pcd_color(mix_all_nor_pcd)
-        simulation_app.close()
+
+        # self.pcd_functions.check_pcd_color(mix_all_nor_pcd)
+        # simulation_app.close()
 
 
     
@@ -691,9 +694,9 @@ class DataCollection():
                 # scooping speed
                 if frame_num % 5 == 0:
     
-                    self.get_info(robot_entity_cfg)
-                    offset = self.apply_offset(current_goal_idx)
-                    modify_ee_goals += offset
+                    # self.get_info(robot_entity_cfg)
+                    # offset = self.apply_offset(current_goal_idx)
+                    # modify_ee_goals += offset
                     
                     goal_pose = modify_ee_goals[current_goal_idx]
 
@@ -710,7 +713,7 @@ class DataCollection():
                         # self.cal_spillage_scooped(scene = scene, reset = 0)
 
                     # change goal
-                    current_goal_idx += 0
+                    current_goal_idx += 1
                     if current_goal_idx == len(modify_ee_goals) :
                         self.record_info()
                         break
@@ -796,9 +799,9 @@ class DataCollection():
         }
 
         # store the data
-        with h5py.File(f'{f"/media/hcis-s22/data/spillage_dataset/time_{self.count}"}.h5', 'w') as h5file:
-            for key, value in data_dict.items():
-                h5file.create_dataset(key, data=value)
+        # with h5py.File(f'{f"/media/hcis-s22/data/spillage_dataset/time_{self.count}"}.h5', 'w') as h5file:
+        #     for key, value in data_dict.items():
+        #         h5file.create_dataset(key, data=value)
             
 
 
@@ -915,12 +918,15 @@ def main():
     # Run the simulator
 
     start_step = 0
-    franka_init_pose = np.load("mean_traj.npy")[start_step]
+    franka_init_pose = np.load("./sample_trail/mean_traj.npy")[start_step]
+    # franka_init_pose = np.load("./sample_trail/col_03/joint_states.npy")[start_step]
     franka_init_pose = np.append(franka_init_pose, 0)
     franka_init_pose = np.append(franka_init_pose, 0)
     franka_init_pose = torch.tensor(franka_init_pose, dtype=torch.float32).unsqueeze(0)
 
-    ee_goals = np.load("mean_eepose_qua.npy")[start_step:160]
+    ee_goals = np.load("./sample_trail/mean_eepose_qua.npy")[start_step:160]
+    # ee_goals = np.load("./sample_trail/col_03/ee_pose_qua.npy")[start_step:160]
+
 
     env = DataCollection(mean_eepose_qua=ee_goals, init_pose = franka_init_pose, food_info = None)
     env.run_simulator(sim, scene)
