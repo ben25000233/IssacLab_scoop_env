@@ -27,10 +27,9 @@ Move `spoon_franka.urdf` to:  /home/user-name/{path}/IsaacLab/URDF
 
 
 - **Line 31**  
-Set the `usd_dir` variable to:  
-```python
-usd_dir = "/home/user-name/{path}/IsaacLab/source/isaaclab_assets/data/franka"
+Set the `usd_dir` variable :  usd_dir = "/home/user-name/{path}/IsaacLab/source/isaaclab_assets/data/franka"
 
+---
 ## ▶️ Run the Simulation
 python interactive_scene.py
 
