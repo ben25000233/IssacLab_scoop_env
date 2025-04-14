@@ -1,23 +1,38 @@
+# 🛠️ IsaacLab Spoon Scene Setup
 
-## Build environments
+This guide explains how to build the environment and set up parameters for running the `interactive_scene.py` script with a custom spoon and bowl setup in IsaacLab.
 
-Isaaclab pakage
+---
 
-## Set parameters
+## 📦 Build Environment
 
-# In interactive_scene.py : 
-line 48 : 
-put spoon_franka.py under "/home/user-name/{path}/IsaacLab/source/isaaclab_assets/isaaclab_assets/robots"
-line 410 :
-put s_bowl.usd under "/home/user_name/{path}/IsaacLab/source/isaaclab_assets/data"
+Ensure the **IsaacLab** package is installed and properly set up.
 
-# In spoon_franka.py
-line 30 : 
-put spoon_franka.urdf under /home/user_name/{path}/IsaacLab/URDF
-line 31 : 
-set usd_dir = "/home/user_name/{path}/IsaacLab/source/isaaclab_assets/data/franka"
-## Run
-```
+---
+
+## ⚙️ Set Parameters
+
+### 🔧 Edit `interactive_scene.py`
+
+- **Line 48**  
+  Move `spoon_franka.py` to:  /home/user-name/{path}/IsaacLab/source/isaaclab_assets/isaaclab_assets/robots
+- **Line 410**  
+Move `s_bowl.usd` to:  /home/user-name/{path}/IsaacLab/source/isaaclab_assets/data
+---
+
+### 🔧 Edit `spoon_franka.py`
+
+- **Line 30**  
+Move `spoon_franka.urdf` to:  /home/user-name/{path}/IsaacLab/URDF
+
+
+- **Line 31**  
+Set the `usd_dir` variable to:  
+```python
+usd_dir = "/home/user-name/{path}/IsaacLab/source/isaaclab_assets/data/franka"
+
+## ▶️ Run the Simulation
 python interactive_scene.py
-```
+
+
 
