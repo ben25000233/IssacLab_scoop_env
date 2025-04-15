@@ -26,12 +26,37 @@ from isaaclab.sim.converters import UrdfConverterCfg
 # exit()
 
 FRANKA_PANDA_CFG = ArticulationCfg(
-    spawn=sim_utils.UrdfFileCfg(
-        asset_path="/home/hcis-s22/benyang/IsaacLab/URDF/spoon_franka/spoon_franka.urdf",
-        usd_dir="/home/hcis-s22/benyang/IsaacLab/source/isaaclab_assets/data/franka",
-        usd_file_name="spoon_franka",
-        fix_base=True,
-        force_usd_conversion=True,
+    # spawn=sim_utils.UrdfFileCfg(
+    #     asset_path="/home/hcis-s22/benyang/IsaacLab/URDF/spoon_franka/spoon_franka.urdf",
+    #     usd_dir="/home/hcis-s22/benyang/IsaacLab/source/isaaclab_assets/data/franka",
+    #     usd_file_name="spoon_franka",
+    #     fix_base=True,
+    #     force_usd_conversion=True,
+    #     activate_contact_sensors=False,
+    #     rigid_props=sim_utils.RigidBodyPropertiesCfg(
+    #         disable_gravity=False,
+    #         max_depenetration_velocity=5.0,
+    #         solver_position_iteration_count=2000,
+    #         solver_velocity_iteration_count = 1000,
+    #         # kinematic_enabled=True, rigid_body_enabled = False,
+    #     ),
+    #     articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+    #         enabled_self_collisions=True, solver_position_iteration_count=800, solver_velocity_iteration_count=0
+    #     ),
+    #     collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.00001, rest_offset=0.00001,),
+    #     joint_drive=UrdfConverterCfg.JointDriveCfg(
+    #             gains=UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=None, damping=None) #stiffness=100.0, damping=1.0
+    #         ),
+    #     collider_type = "convex_decomposition", 
+    #     collision_from_visuals = True, 
+
+    #     semantic_tags = [("class", "robot")],
+    #     merge_fixed_joints = True
+        
+    # ),
+
+    spawn=sim_utils.UsdFileCfg(
+        usd_path="/home/hcis-s22/benyang/IsaacLab/source/isaaclab_assets/data/franka/spoon_franka.usd",
         activate_contact_sensors=False,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -43,17 +68,10 @@ FRANKA_PANDA_CFG = ArticulationCfg(
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=True, solver_position_iteration_count=800, solver_velocity_iteration_count=0
         ),
-        collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0,),
-        joint_drive=UrdfConverterCfg.JointDriveCfg(
-                gains=UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=None, damping=None) #stiffness=100.0, damping=1.0
-            ),
-        collider_type = "convex_decomposition", 
-        collision_from_visuals = True, 
-
+        collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.00001, rest_offset=0.00001,),
         semantic_tags = [("class", "robot")],
-        merge_fixed_joints = True
-        
     ),
+
 
 
     init_state=ArticulationCfg.InitialStateCfg(
